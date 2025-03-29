@@ -78,16 +78,25 @@ def get_vertex_data(data, meshes):
     original = meshes[0].vertices
     offsets = []
     normals = []
-    for me in reversed(meshes):
-        for v in me.vertices:
-            offset = v.co - original[v.index].co
+    for mesh in reversed(meshes):
+        for vertex in mesh.vertices:
+            offset = vertex.co - original[vertex.index].co
             x, y, z = offset
-            offsets.extend((x, -y, z, 1))
-            x, y, z = v.normal
-            normals.extend(((x + 1) * 0.5, (-y + 1) * 0.5, (z + 1) * 0.5, 1))
-        if not me.users:
-            data.meshes.remove(me)
+            offsets.extend((x, y, z, 1)) # Why is the y-axis inverted?
+            x, y, z = vertex.normal
+            normals.extend(
+                (normalize_signed_to_zero_to_one_space(x),
+                 normalize_signed_to_zero_to_one_space(y),
+                normalize_signed_to_zero_to_one_space(z),
+                 1)
+            ) # Why is the y-axis inverted?
+        if not mesh.users:
+            data.meshes.remove(mesh)
     return offsets, normals
+
+
+def normalize_signed_to_zero_to_one_space(x):
+    return (x + 1) * 0.5
 
 
 def frame_range(scene):
@@ -111,6 +120,24 @@ def bake_vertex_data(data, offsets, normals, size):
         height=height,
         alpha=True
     )
+
+    lowest_negative_offset = 0
+    highest_positive_offset = 0
+    for float_index in range(len(offsets)):
+        if float_index >= len(offsets) or (float_index +1) % 4 == 0:
+            continue
+        lowest_negative_offset = min(offsets[float_index], lowest_negative_offset)
+        highest_positive_offset = max(offsets[float_index], highest_positive_offset)
+
+    lowest_negative_offset *= -1
+    highest_positive_offset = 1 if highest_positive_offset == 0 else highest_positive_offset + lowest_negative_offset
+
+    for float_index in range(len(offsets)):
+        if float_index >= len(offsets) or (float_index +1) % 4 == 0:
+            continue
+        offsets[float_index] += lowest_negative_offset
+        offsets[float_index] /= highest_positive_offset
+
     offset_texture.pixels = offsets
     normal_texture.pixels = normals
 
@@ -159,13 +186,13 @@ class OBJECT_OT_ProcessAnimMeshes(bpy.types.Operator):
         if vertex_count > 8192:
             self.report(
                 {'ERROR'},
-                f"Vertex count of {vertex_count :,}, execedes limit of 8,192!"
+                f"Vertex count of {vertex_count :,}, exceeds limit of 8,192!"
             )
             return {'CANCELLED'}
         if frame_count > 8192:
             self.report(
                 {'ERROR'},
-                f"Frame count of {frame_count :,}, execedes limit of 8,192!"
+                f"Frame count of {frame_count :,}, exceeds limit of 8,192!"
             )
             return {'CANCELLED'}
         meshes = get_per_frame_mesh_data(context, data, objects)
