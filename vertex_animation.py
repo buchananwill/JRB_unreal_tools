@@ -45,16 +45,16 @@ def get_per_frame_mesh_data(context, data, objects):
         bm = bmesh.new()
         for ob in objects:
             eval_object = ob.evaluated_get(depsgraph)
-            me = data.meshes.new_from_object(eval_object)
-            me.transform(ob.matrix_world)
-            bm.from_mesh(me)
-            data.meshes.remove(me)
-        me = data.meshes.new("mesh")
+            mesh = data.meshes.new_from_object(eval_object)
+            mesh.transform(ob.matrix_world)
+            bm.from_mesh(mesh)
+            data.meshes.remove(mesh)
+        mesh = data.meshes.new("mesh")
         bm.normal_update()
-        bm.to_mesh(me)
+        bm.to_mesh(mesh)
         bm.free()
-        me.update()
-        meshes.append(me)
+        mesh.update()
+        meshes.append(mesh)
     return meshes
 
 
@@ -82,14 +82,14 @@ def get_vertex_data(data, meshes):
         for vertex in mesh.vertices:
             offset = vertex.co - original[vertex.index].co
             x, y, z = offset
-            offsets.extend((x, y, z, 1)) # Why is the y-axis inverted?
+            offsets.extend((x, y, z, 1.0))
             x, y, z = vertex.normal
             normals.extend(
                 (normalize_signed_to_zero_to_one_space(x),
                  normalize_signed_to_zero_to_one_space(y),
                 normalize_signed_to_zero_to_one_space(z),
-                 1)
-            ) # Why is the y-axis inverted?
+                 1.0)
+            )
         if not mesh.users:
             data.meshes.remove(mesh)
     return offsets, normals
@@ -100,15 +100,34 @@ def normalize_signed_to_zero_to_one_space(x):
 
 
 def frame_range(scene):
-    """Return a range object with with scene's frame start, end, and step"""
+    """Return a range object with scene's frame start, end, and step"""
     return range(scene.frame_start, scene.frame_end, scene.frame_step)
 
 
 def bake_vertex_data(data, offsets, normals, size):
-    """Stores vertex offsets and normals in seperate image textures"""
+    """Stores vertex offsets and normals in separate image textures"""
     width, height = size
+
+    lowest_negative_offset = 0.0
+    highest_positive_offset = 0.0
+    for float_index in range(len(offsets)):
+        if float_index >= len(offsets) or (float_index +1) % 4 == 0:
+            continue
+        lowest_negative_offset = min(offsets[float_index], lowest_negative_offset)
+        highest_positive_offset = max(offsets[float_index], highest_positive_offset)
+
+    lowest_negative_offset *= -1
+    neg_max_plus_pos_max = highest_positive_offset + lowest_negative_offset
+    neg_max_plus_pos_max = 1 if neg_max_plus_pos_max == 0 else neg_max_plus_pos_max
+
+    for float_index in range(len(offsets)):
+        if float_index >= len(offsets) or (float_index +1) % 4 == 0:
+            continue
+        offsets[float_index] += lowest_negative_offset
+        offsets[float_index] /= neg_max_plus_pos_max
+
     offset_texture = data.images.new(
-        name="offsets",
+        name=f"offsets_neg_max_{lowest_negative_offset}_pos_max_{highest_positive_offset}" ,
         width=width,
         height=height,
         alpha=True,
@@ -121,30 +140,13 @@ def bake_vertex_data(data, offsets, normals, size):
         alpha=True
     )
 
-    lowest_negative_offset = 0
-    highest_positive_offset = 0
-    for float_index in range(len(offsets)):
-        if float_index >= len(offsets) or (float_index +1) % 4 == 0:
-            continue
-        lowest_negative_offset = min(offsets[float_index], lowest_negative_offset)
-        highest_positive_offset = max(offsets[float_index], highest_positive_offset)
-
-    lowest_negative_offset *= -1
-    highest_positive_offset = 1 if highest_positive_offset == 0 else highest_positive_offset + lowest_negative_offset
-
-    for float_index in range(len(offsets)):
-        if float_index >= len(offsets) or (float_index +1) % 4 == 0:
-            continue
-        offsets[float_index] += lowest_negative_offset
-        offsets[float_index] /= highest_positive_offset
-
     offset_texture.pixels = offsets
     normal_texture.pixels = normals
 
 
 class OBJECT_OT_ProcessAnimMeshes(bpy.types.Operator):
     """Store combined per frame vertex offsets and normals for all
-    selected mesh objects into seperate image textures"""
+    selected mesh objects into separate image textures"""
     bl_idname = "object.process_anim_meshes"
     bl_label = "Process Anim Meshes"
 
