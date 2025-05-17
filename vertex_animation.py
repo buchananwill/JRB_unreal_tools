@@ -142,6 +142,62 @@ def bake_vertex_data(data, offsets, normals, size):
 
     offset_texture.pixels = offsets
     normal_texture.pixels = normals
+    return [offset_texture, normal_texture]
+
+import bpy
+import os
+import re
+
+
+def save_image_exr(image: bpy.types.Image, halfdepth = False):
+    """
+    Save a Blender Image as OpenEXR (RGBA, Float Full depth, Codec None, Non-Color)
+    into the folder containing the current .blend file, resolving name conflicts
+    by adding or incrementing a _N suffix.
+
+    :param image: The bpy.types.Image to save.
+    """
+    # Ensure the .blend is saved
+    blend_path = bpy.data.filepath
+    if not blend_path:
+        raise RuntimeError("Please save your .blend file before calling save_image_exr().")
+    directory = os.path.dirname(blend_path)
+
+    # Base name (no extension) from image.name
+    base_name = os.path.splitext(image.name)[0]
+    ext = ".exr"
+
+    # Helper to compute a unique filename
+    def unique_filepath(name):
+        full = os.path.join(directory, name + ext)
+        if not os.path.exists(full):
+            return name, full
+
+        # If already ends with _<num>, bump it; otherwise start at 1
+        m = re.match(r'^(.*)_(\d+)$', name)
+        if m:
+            root, idx = m.group(1), int(m.group(2)) + 1
+        else:
+            root, idx = name, 1
+
+        return unique_filepath(f"{root}_{idx}")
+
+    # Determine final name + path
+    final_name, filepath = unique_filepath(base_name)
+
+    # Create a context override so the operator knows which image to save
+    image.file_format = 'OPEN_EXR'
+    # image.use_half_precision = halfdepth
+    # image.colorspace_settings.name = 'NONE'
+    # image.colorspace_settings.is_data = True
+    image.filepath = filepath
+    image.save()
+
+    print(f"Image '{image.name}' saved as '{os.path.basename(filepath)}'")
+
+# Example usage:
+# img = bpy.data.images['Render Result']
+# save_image_exr(img)
 
 
 class OBJECT_OT_ProcessAnimMeshes(bpy.types.Operator):
@@ -202,7 +258,10 @@ class OBJECT_OT_ProcessAnimMeshes(bpy.types.Operator):
         create_export_mesh_object(context, data, export_mesh_data)
         offsets, normals = get_vertex_data(data, meshes)
         texture_size = vertex_count, frame_count
-        bake_vertex_data(data, offsets, normals, texture_size)
+        offsets_texture, normals_texture = bake_vertex_data(data, offsets, normals, texture_size)
+        save_image_exr(offsets_texture)
+        save_image_exr(normals_texture)
+
         return {'FINISHED'}
 
 
