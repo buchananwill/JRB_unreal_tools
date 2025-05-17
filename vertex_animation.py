@@ -101,7 +101,7 @@ def normalize_signed_to_zero_to_one_space(x):
 
 def frame_range(scene):
     """Return a range object with scene's frame start, end, and step"""
-    return range(scene.frame_start, scene.frame_end, scene.frame_step)
+    return range(scene.frame_start, scene.frame_end+1, scene.frame_step)
 
 
 def bake_vertex_data(data, offsets, normals, size):
