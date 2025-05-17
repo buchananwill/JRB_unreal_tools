@@ -34,6 +34,7 @@ bl_info = {
 
 import bpy
 import bmesh
+import warnings
 
 
 def get_per_frame_mesh_data(context, data, objects):
@@ -126,8 +127,12 @@ def bake_vertex_data(data, offsets, normals, size):
         offsets[float_index] += lowest_negative_offset
         offsets[float_index] /= neg_max_plus_pos_max
 
+    lno_str = str(lowest_negative_offset).replace(".", "_")
+
+    hpo_str = str(highest_positive_offset).replace(".", "_")
+
     offset_texture = data.images.new(
-        name=f"offsets_neg_max_{lowest_negative_offset}_pos_max_{highest_positive_offset}" ,
+        name=f"offsets_neg_max_{lno_str}_pos_max_{hpo_str}" ,
         width=width,
         height=height,
         alpha=True,
@@ -142,14 +147,12 @@ def bake_vertex_data(data, offsets, normals, size):
 
     offset_texture.pixels = offsets
     normal_texture.pixels = normals
-    return [offset_texture, normal_texture]
+    return offset_texture, normal_texture
 
 import bpy
 import os
-import re
 
-
-def save_image_exr(image: bpy.types.Image, halfdepth = False):
+def save_image_exr(image: bpy.types.Image):
     """
     Save a Blender Image as OpenEXR (RGBA, Float Full depth, Codec None, Non-Color)
     into the folder containing the current .blend file, resolving name conflicts
@@ -164,40 +167,34 @@ def save_image_exr(image: bpy.types.Image, halfdepth = False):
     directory = os.path.dirname(blend_path)
 
     # Base name (no extension) from image.name
-    base_name = os.path.splitext(image.name)[0]
+    base_name = image.name
     ext = ".exr"
 
-    # Helper to compute a unique filename
-    def unique_filepath(name):
-        full = os.path.join(directory, name + ext)
-        if not os.path.exists(full):
-            return name, full
+    full = os.path.join(directory, base_name + ext)
+    if os.path.exists(full):  # check existence :contentReference[oaicite:6]{index=6}
+        warnings.warn(
+            f"File '{full}' already exists; could not save image.",
+            UserWarning
+        )  # emit a warning :contentReference[oaicite:7]{index=7}
 
-        # If already ends with _<num>, bump it; otherwise start at 1
-        m = re.match(r'^(.*)_(\d+)$', name)
-        if m:
-            root, idx = m.group(1), int(m.group(2)) + 1
-        else:
-            root, idx = name, 1
 
-        return unique_filepath(f"{root}_{idx}")
+    temp_scene = bpy.data.scenes.new(name=base_name)
 
-    # Determine final name + path
-    final_name, filepath = unique_filepath(base_name)
+    # 2. Configure EXR settings
+    ims = temp_scene.render.image_settings
+    ims.file_format = 'OPEN_EXR'
+    ims.color_mode = 'RGBA'
+    ims.color_depth = '32'
+    ims.exr_codec = 'NONE'
 
     # Create a context override so the operator knows which image to save
-    image.file_format = 'OPEN_EXR'
-    # image.use_half_precision = halfdepth
-    # image.colorspace_settings.name = 'NONE'
-    # image.colorspace_settings.is_data = True
-    image.filepath = filepath
-    image.save()
+    image.save_render(full, scene=temp_scene)
 
-    print(f"Image '{image.name}' saved as '{os.path.basename(filepath)}'")
+    bpy.data.scenes.remove(temp_scene)
 
-# Example usage:
-# img = bpy.data.images['Render Result']
-# save_image_exr(img)
+    print(f"Image '{image.name}' saved as '{os.path.basename(full)}'")
+
+
 
 
 class OBJECT_OT_ProcessAnimMeshes(bpy.types.Operator):
